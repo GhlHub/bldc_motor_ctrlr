@@ -264,7 +264,7 @@ module bldc_axi_controller_tb;
         axi_read(ADDR_ID, rd_data);
         expect_equal(rd_data, 32'h424C_4443, "ID register mismatch");
 
-        axi_write(ADDR_PWM_CFG, {16'd417, 4'd0, 12'd2048});
+        axi_write(ADDR_PWM_CFG, {16'd695, 4'd0, 12'd2048});
         axi_write(ADDR_DEADTIME, {16'd0, 8'd10, 8'd20});
         axi_write(ADDR_COMM_CFG, 32'd1);
         axi_write(ADDR_CONTROL, 32'h0000_0001);
@@ -393,7 +393,7 @@ module bldc_axi_controller_tb;
             fail("FIFO interrupt should deassert after draining the FIFO");
         end
 
-        axi_write(ADDR_PWM_CFG, {16'd417, 4'd0, 12'd100});
+        axi_write(ADDR_PWM_CFG, {16'd695, 4'd0, 12'd100});
         axi_write(ADDR_SPEED_TARGET, {4'd0, 12'd16, 16'd3});
         axi_write(ADDR_SPEED_WINDOW, 32'd400);
         axi_write(ADDR_CONTROL, 32'h0000_000B);

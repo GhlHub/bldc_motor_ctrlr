@@ -21,8 +21,8 @@ module bldc_motor_ctrl_domain (
 );
 
     localparam logic [31:0] ID_VALUE          = 32'h424C_4443;
-    localparam int unsigned PWM_PERIOD_MIN    = 16'd417;
-    localparam int unsigned PWM_PERIOD_MAX    = 16'd7500;
+    localparam int unsigned PWM_PERIOD_MIN    = 16'd695;
+    localparam int unsigned PWM_PERIOD_MAX    = 16'd12500;
     localparam int unsigned DEADTIME_MIN      = 8'd1;
     localparam int unsigned DEADTIME_MAX      = 8'd90;
 
@@ -152,7 +152,7 @@ module bldc_motor_ctrl_domain (
             direction_reg          <= 1'b0;
             speed_ctrl_enable_reg  <= 1'b0;
             duty_cmd_reg           <= 12'd0;
-            pwm_period_reg         <= 16'd7500;
+            pwm_period_reg         <= 16'd12500;
             deadtime_reg           <= 8'd1;
             low_overlap_reg        <= 8'd0;
             manual_comm_state_reg  <= 3'd0;

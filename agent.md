@@ -30,7 +30,11 @@ This repository implements a BLDC motor controller in SystemVerilog with an AXI-
 - Commutation supports:
   - software-selected manual state
   - automatic Hall-based state selection
-  - programmable deadtime
+  - programmable deadtime and low-side overlap
+- The motor core uses an explicit transition-phase FSM:
+  - `PH_RUN`
+  - `PH_OVERLAP`
+  - `PH_DEADTIME`
 - PWM frequency is set by register-programmed period
 - Interrupts cover:
   - Hall rising and falling edges
@@ -72,6 +76,12 @@ High sides are blanked for the deadtime interval on every state transition.
 Low sides are never globally blanked.
 If the low-side leg changes, the old and new low sides overlap for a programmable interval before dropping the old low side.
 
+The transition implementation is intentionally explicit:
+
+- `active_comm_state` is the committed run state
+- `requested_comm_state` is the pending destination state
+- `comm_phase` determines whether outputs are in run, overlap, or deadtime behavior
+
 ## Validation Command
 
 Use this as the default regression:
@@ -96,6 +106,9 @@ The test should end with `PASS`.
   high sides off during deadtime
   low sides never globally blanked
   low-side changes use the programmed overlap interval
+- If commutation behavior changes, update:
+  - `readme.md`
+  - `doc/commutation_transition_graph.md`
 
 ## Likely Next Extensions
 

@@ -44,6 +44,12 @@ module bldc_motor_core (
     output logic [7:0]  deadtime_count
 );
 
+    typedef enum logic [1:0] {
+        PH_RUN      = 2'd0,
+        PH_OVERLAP  = 2'd1,
+        PH_DEADTIME = 2'd2
+    } comm_phase_t;
+
     logic [2:0]  hall_meta;
     logic [2:0]  hall_sync_raw;
     logic [2:0]  hall_prev;
@@ -63,6 +69,7 @@ module bldc_motor_core (
     logic [15:0] pwm_on_counts;
     logic [27:0] pwm_product;
     logic [5:0]  drive_outputs_next;
+    comm_phase_t comm_phase;
 
     function automatic logic [2:0] hall_to_comm_state(
         input logic direction,
@@ -154,6 +161,7 @@ module bldc_motor_core (
     assign hall_mapped_state = hall_to_comm_state(direction_reg, hall_sync);
     assign fifo_irq_level   = (fifo_level != 5'd0);
     assign fifo_data        = (fifo_level != 5'd0) ? transition_fifo[fifo_rd_ptr] : 16'd0;
+    assign deadtime_active  = (comm_phase != PH_RUN);
 
     always @* begin
         pwm_product = current_duty * pwm_period_reg;
@@ -181,17 +189,19 @@ module bldc_motor_core (
         drive_outputs_next = 6'b0;
 
         if (drive_enable_reg) begin
-            if (deadtime_active) begin
-                if (low_overlap_count != 8'd0) begin
+            case (comm_phase)
+                PH_OVERLAP: begin
                     drive_outputs_next =
                         comm_low_pattern(active_comm_state) |
                         comm_low_pattern(requested_comm_state);
-                end else begin
+                end
+                PH_DEADTIME: begin
                     drive_outputs_next = comm_low_pattern(requested_comm_state);
                 end
-            end else begin
-                drive_outputs_next = comm_drive_pattern(active_comm_state, pwm_high);
-            end
+                default: begin
+                    drive_outputs_next = comm_drive_pattern(active_comm_state, pwm_high);
+                end
+            endcase
         end
     end
 
@@ -206,6 +216,8 @@ module bldc_motor_core (
         logic [3:0] fifo_rd_ptr_next;
         logic [3:0] fifo_wr_ptr_next;
         logic [4:0] fifo_level_next;
+        logic       low_side_changes;
+        logic [7:0] overlap_load;
 
         if (!rst_n) begin
             hall_meta              <= 3'd0;
@@ -218,8 +230,8 @@ module bldc_motor_core (
             hall_irq_pending_reg   <= 6'd0;
             requested_comm_state   <= 3'd0;
             active_comm_state      <= 3'd0;
+            comm_phase             <= PH_RUN;
             deadtime_count         <= 8'd0;
-            deadtime_active        <= 1'b0;
             main_transition_count  <= 16'd0;
             main_window_count      <= 32'd0;
             auto_transition_count  <= 16'd0;
@@ -255,6 +267,8 @@ module bldc_motor_core (
             fifo_rd_ptr_next      = fifo_rd_ptr;
             fifo_wr_ptr_next      = fifo_wr_ptr;
             fifo_level_next       = fifo_level;
+            low_side_changes      = 1'b0;
+            overlap_load          = 8'd0;
 
             hall_meta <= {HC, HB, HA};
             hall_sync_raw <= hall_meta;
@@ -276,45 +290,50 @@ module bldc_motor_core (
             end
 
             if (comm_transition_pulse) begin
-                requested_comm_state <= next_requested_state;
-                if ((next_requested_state != active_comm_state) || deadtime_active) begin
-                    deadtime_active <= 1'b1;
-                    deadtime_count  <= deadtime_reg;
-                    if (comm_low_pattern(active_comm_state) != comm_low_pattern(next_requested_state)) begin
-                        if (low_overlap_reg < deadtime_reg) begin
-                            low_overlap_count <= low_overlap_reg;
-                        end else begin
-                            low_overlap_count <= deadtime_reg;
-                        end
+                if (next_requested_state != active_comm_state) begin
+                    requested_comm_state <= next_requested_state;
+                    deadtime_count       <= deadtime_reg;
+                    low_side_changes     = (comm_low_pattern(active_comm_state) != comm_low_pattern(next_requested_state));
+                    if (low_overlap_reg < deadtime_reg) begin
+                        overlap_load = low_overlap_reg;
+                    end else begin
+                        overlap_load = deadtime_reg;
+                    end
+                    if (low_side_changes && (overlap_load != 8'd0)) begin
+                        low_overlap_count <= overlap_load;
+                        comm_phase        <= PH_OVERLAP;
                     end else begin
                         low_overlap_count <= 8'd0;
+                        comm_phase        <= PH_DEADTIME;
                     end
                 end
-            end
+            end else begin
+                case (comm_phase)
+                    PH_OVERLAP: begin
+                        if (low_overlap_count > 8'd1) begin
+                            low_overlap_count <= low_overlap_count - 8'd1;
+                        end else begin
+                            low_overlap_count <= 8'd0;
+                            comm_phase        <= PH_DEADTIME;
+                        end
 
-            if (deadtime_active) begin
-                if (low_overlap_count != 8'd0) begin
-                    low_overlap_count <= low_overlap_count - 8'd1;
-                end
-                if (deadtime_count != 8'd0) begin
-                    deadtime_count <= deadtime_count - 8'd1;
-                end else begin
-                    deadtime_active   <= 1'b0;
-                    active_comm_state <= requested_comm_state;
-                    low_overlap_count <= 8'd0;
-                end
-            end else if (requested_comm_state != active_comm_state) begin
-                deadtime_active <= 1'b1;
-                deadtime_count  <= deadtime_reg;
-                if (comm_low_pattern(active_comm_state) != comm_low_pattern(requested_comm_state)) begin
-                    if (low_overlap_reg < deadtime_reg) begin
-                        low_overlap_count <= low_overlap_reg;
-                    end else begin
-                        low_overlap_count <= deadtime_reg;
+                        if (deadtime_count != 8'd0) begin
+                            deadtime_count <= deadtime_count - 8'd1;
+                        end
                     end
-                end else begin
-                    low_overlap_count <= 8'd0;
-                end
+                    PH_DEADTIME: begin
+                        if (deadtime_count > 8'd1) begin
+                            deadtime_count <= deadtime_count - 8'd1;
+                        end else begin
+                            deadtime_count     <= 8'd0;
+                            active_comm_state  <= requested_comm_state;
+                            low_overlap_count  <= 8'd0;
+                            comm_phase         <= PH_RUN;
+                        end
+                    end
+                    default: begin
+                    end
+                endcase
             end
 
             if (pwm_counter == (pwm_period_reg - 16'd1)) begin
