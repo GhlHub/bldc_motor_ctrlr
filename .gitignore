@@ -1,0 +1,5 @@
+sim/
+vivado.log
+vivado.jou
+*.log
+*.jou

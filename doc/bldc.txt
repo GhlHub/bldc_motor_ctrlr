@@ -1,0 +1,23 @@
+Create a bldc motor controller with an axi-lite slave
+
+Refer to ascii export of schematic in file SpartanESC.asc present in directory doc
+
+Referring to the schematic, the controller has the following inputs, HA, HB, HC. The controller has the following outputs AL,AH,BL,BH,CL,CH
+
+Design a Brushless motor controller to control the outputs. The controller should have an axi-lite slave. Assume the axi slave is running at 60MHz. There should be interrupts for posedge and negedge transitions on HA, HB, HC. There should be a mask register to optionally mask these interrupts.
+
+The controller should accept a 12-bit value for the desired pwm width duty cycle along with a single bit direction indicator. the valid pwm frequency is between 8 khz to 144 khz.
+
+There should be a control bit to enable auto commutation based on the detected transitions on HA, HB and HC.
+
+There should be a register for software to manually set commutation state when auto commutation is disabled.
+
+There should be a register to select the deadtime when transitioning between commutation states.
+The deadtime should have a configuration range of 16.667ns to around 1.5us.
+
+This deadtime shoud be honored reguardless of how the commutation state was transitioned.
+
+There should be a counter that counts the number of commutation state transitions in a programmed time window specified by a control register. the time window will be defined by the number of 60MHz clocks. when the time window has expired, the number of commutation state transitions observed should be pushed into a 16 entry fifo. if the fifo is not empty an interrupt should be generated. there should be a control bit to optionally mask the interrupt. When the host reads from the fifo, the entry should be popped.
+
+There should be an optional mode that can be enabled, where the controller will automatically modulate the pwm duty cycle to acheive a targeted auto-commutation rate. there should be a register to read the current pwm duty cycle. in this mode, the controller should use it's own seperate transition state counter and time window definition than the one just defined above. The time window for the transition state counter is defined by the user.
+

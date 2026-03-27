@@ -1,0 +1,105 @@
+# Agent Notes
+
+## Purpose
+
+This repository implements a BLDC motor controller in SystemVerilog with an AXI-Lite register interface and a self-checking simulation testbench.
+
+## Current Layout
+
+- `doc/`
+  - `bldc.txt`: source requirements
+  - `SpartanESC.asc`: reference schematic export
+- `rtl/`
+  - `bldc_axi_controller.sv`: thin top-level wrapper
+  - `bldc_axi_slave.sv`: AXI-Lite frontend and CDC command source
+  - `bldc_motor_ctrl_domain.sv`: motor-domain register bank and CDC command sink
+  - `bldc_motor_core.sv`: motor-control core
+- `tb/`
+  - `bldc_axi_controller_tb.sv`: self-checking testbench
+- `sim/`
+  - generated simulation outputs
+
+## Design Summary
+
+- Two clock domains:
+  - 60 MHz AXI-Lite domain
+  - 100 MHz motor-control domain
+- Hall inputs are synchronized internally
+- Hall inputs are synchronized and passed through a 5-sample majority filter before edge detection and commutation
+- Bridge outputs are registered in the motor core; keep them clocked to avoid drive glitches
+- Commutation supports:
+  - software-selected manual state
+  - automatic Hall-based state selection
+  - programmable deadtime
+- PWM frequency is set by register-programmed period
+- Interrupts cover:
+  - Hall rising and falling edges
+  - transition FIFO not-empty
+- Transition measurement exists in two paths:
+  - main sampling window feeding the FIFO
+  - auto-duty control window feeding a simple up/down duty controller
+
+The intended hierarchy is:
+
+- top-level wrapper
+- standalone AXI slave
+- standalone motor control domain
+- standalone control core
+
+Do not instantiate motor-control blocks inside the AXI slave.
+
+## Commutation Behavior
+
+Forward Hall mapping:
+
+- `001 -> 1`
+- `101 -> 2`
+- `100 -> 3`
+- `110 -> 4`
+- `010 -> 5`
+- `011 -> 6`
+
+Output mapping:
+
+- `1`: `AH` PWM, `BL` on
+- `2`: `AH` PWM, `CL` on
+- `3`: `BH` PWM, `CL` on
+- `4`: `BH` PWM, `AL` on
+- `5`: `CH` PWM, `AL` on
+- `6`: `CH` PWM, `BL` on
+
+High sides are blanked for the deadtime interval on every state transition.
+Low sides are never globally blanked.
+If the low-side leg changes, the old and new low sides overlap for a programmable interval before dropping the old low side.
+
+## Validation Command
+
+Use this as the default regression:
+
+```sh
+mkdir -p sim
+iverilog -g2012 -o sim/bldc_axi_controller_tb.out rtl/bldc_axi_controller.sv tb/bldc_axi_controller_tb.sv
+vvp sim/bldc_axi_controller_tb.out
+```
+
+The test should end with `PASS`.
+
+## Editing Guidance
+
+- Keep the design synthesizable.
+- Preserve the AXI-Lite register map unless there is a deliberate interface change.
+- If register layout changes, update both:
+  - `rtl/bldc_axi_controller.sv`
+  - `tb/bldc_axi_controller_tb.sv`
+- Prefer adding behavioral checks to the testbench instead of relying on waveform inspection.
+- Keep commutation timing explicit:
+  high sides off during deadtime
+  low sides never globally blanked
+  low-side changes use the programmed overlap interval
+
+## Likely Next Extensions
+
+- Separate prescaler or direct frequency register abstraction for PWM
+- Better FIFO overflow reporting
+- Programmable commutation tables
+- Formal assertions for AXI-Lite and deadtime safety
