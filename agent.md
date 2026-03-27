@@ -116,3 +116,4 @@ The test should end with `PASS`.
 - Better FIFO overflow reporting
 - Programmable commutation tables
 - Formal assertions for AXI-Lite and deadtime safety
+- Investigate regenerative-braking capability in the ESC schematic for the next ESC revision, including battery charge acceptance, current sensing, and bus overvoltage handling

@@ -148,3 +148,7 @@ The self-checking testbench verifies:
 - AXI register accesses cross into the motor domain through a request/response CDC bridge.
 - The FIFO drops new samples when full.
 - Invalid Hall combinations map to commutation state `0`, which disables bridge drive until a valid code appears.
+
+## TODO
+
+- Investigate regenerative-braking capability in the ESC schematic for the next ESC revision, including charge acceptance on `VBUS`, current-sensing needs, and any required overvoltage or dump-path hardware.
