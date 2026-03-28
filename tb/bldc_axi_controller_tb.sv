@@ -18,10 +18,12 @@ module bldc_axi_controller_tb;
     localparam logic [7:0] ADDR_SPEED_WINDOW = 8'h2C;
     localparam logic [7:0] ADDR_SPEED_STATUS = 8'h30;
     localparam logic [7:0] ADDR_STATUS       = 8'h34;
+    localparam logic [7:0] ADDR_BRAKE_CFG    = 8'h38;
 
     logic        clk_axi;
     logic        clk_motor;
-    logic        rst_n;
+    logic        rst_axi_n;
+    logic        rst_motor_n;
     logic        HA;
     logic        HB;
     logic        HC;
@@ -54,7 +56,8 @@ module bldc_axi_controller_tb;
     bldc_axi_controller dut (
         .clk_axi(clk_axi),
         .clk_motor(clk_motor),
-        .rst_n(rst_n),
+        .rst_axi_n(rst_axi_n),
+        .rst_motor_n(rst_motor_n),
         .HA(HA),
         .HB(HB),
         .HC(HC),
@@ -239,9 +242,14 @@ module bldc_axi_controller_tb;
     bit          saw_post_overlap_deadtime;
     bit          saw_pwm_high;
     bit          saw_pwm_low;
+    bit          saw_brake_entry_blank;
+    bit          saw_brake_pwm_on;
+    bit          saw_brake_pwm_off;
+    bit          saw_brake_exit_blank;
 
     initial begin
-        rst_n          = 1'b0;
+        rst_axi_n      = 1'b0;
+        rst_motor_n    = 1'b0;
         HA             = 1'b0;
         HB             = 1'b0;
         HC             = 1'b0;
@@ -257,7 +265,10 @@ module bldc_axi_controller_tb;
 
         wait_axi_cycles(5);
         wait_motor_cycles(5);
-        rst_n = 1'b1;
+        @(posedge clk_axi);
+        rst_axi_n = 1'b1;
+        @(posedge clk_motor);
+        rst_motor_n = 1'b1;
         wait_axi_cycles(5);
         wait_motor_cycles(5);
 
@@ -425,6 +436,63 @@ module bldc_axi_controller_tb;
         end
         if (speed_status_2[27:12] != 16'd5) begin
             fail("Auto-duty status should report the measured transition count");
+        end
+
+        axi_write(ADDR_CONTROL, 32'h0000_0001);
+        axi_write(ADDR_COMM_CFG, 32'd1);
+        axi_write(ADDR_DEADTIME, {16'd0, 8'd0, 8'd6});
+        axi_write(ADDR_BRAKE_CFG, 32'd2048);
+        wait_motor_cycles(30);
+
+        axi_write(ADDR_CONTROL, 32'h0000_0011);
+        saw_brake_entry_blank = 1'b0;
+        repeat (20) begin
+            @(posedge clk_motor);
+            if ((AH === 1'b0) && (BH === 1'b0) && (CH === 1'b0) &&
+                (AL === 1'b0) && (BL === 1'b0) && (CL === 1'b0)) begin
+                saw_brake_entry_blank = 1'b1;
+            end
+        end
+        if (!saw_brake_entry_blank) begin
+            fail("Brake entry should blank all bridge outputs for deadtime");
+        end
+
+        saw_brake_pwm_on  = 1'b0;
+        saw_brake_pwm_off = 1'b0;
+        repeat (900) begin
+            @(posedge clk_motor);
+            if ((AH === 1'b0) && (BH === 1'b0) && (CH === 1'b0) &&
+                (AL === 1'b1) && (BL === 1'b1) && (CL === 1'b1)) begin
+                saw_brake_pwm_on = 1'b1;
+            end
+            if ((AH === 1'b0) && (BH === 1'b0) && (CH === 1'b0) &&
+                (AL === 1'b0) && (BL === 1'b0) && (CL === 1'b0)) begin
+                saw_brake_pwm_off = 1'b1;
+            end
+        end
+        if (!saw_brake_pwm_on) begin
+            fail("Brake PWM should assert all three low sides with all high sides off");
+        end
+        if (!saw_brake_pwm_off) begin
+            fail("Brake PWM should also produce low-side off-time");
+        end
+
+        axi_write(ADDR_CONTROL, 32'h0000_0001);
+        saw_brake_exit_blank = 1'b0;
+        repeat (20) begin
+            @(posedge clk_motor);
+            if ((AH === 1'b0) && (BH === 1'b0) && (CH === 1'b0) &&
+                (AL === 1'b0) && (BL === 1'b0) && (CL === 1'b0)) begin
+                saw_brake_exit_blank = 1'b1;
+            end
+        end
+        if (!saw_brake_exit_blank) begin
+            fail("Brake exit should blank all bridge outputs for deadtime");
+        end
+
+        wait_motor_cycles(30);
+        if (BL !== 1'b1) begin
+            fail("Normal commutation should resume after brake exit");
         end
 
         $display("PASS");

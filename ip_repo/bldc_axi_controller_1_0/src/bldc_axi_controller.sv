@@ -110,6 +110,3 @@ module bldc_axi_controller #(
 
 endmodule
 
-`include "rtl/bldc_axi_slave.sv"
-`include "rtl/bldc_motor_ctrl_domain.sv"
-`include "rtl/bldc_motor_core.sv"

@@ -4,6 +4,7 @@ This document shows both:
 
 - the external commutation state-to-state behavior
 - the internal transition-phase FSM used to implement overlap and deadtime
+- the brake override flow used for low-side PWM braking
 
 - All high sides are off during deadtime.
 - `X+Y→Y` means old and new low sides overlap for `low_overlap`, then only the new low side remains on until deadtime ends.
@@ -74,4 +75,24 @@ stateDiagram-v2
     PH_RUN --> PH_DEADTIME: new state requested\nsame low side or low_overlap = 0
     PH_OVERLAP --> PH_DEADTIME: overlap counter expires
     PH_DEADTIME --> PH_RUN: deadtime counter expires\nactive_comm_state = requested_comm_state
+```
+
+## Brake Override FSM
+
+Brake is implemented as a separate override path on top of normal commutation:
+
+- `BR_OFF`: normal commutation path is active
+- `BR_ENTER_DEADTIME`: all bridge outputs off before brake starts
+- `BR_ACTIVE`: all high sides off, `AL`, `BL`, and `CL` PWM together
+- `BR_EXIT_DEADTIME`: all bridge outputs off before returning to commutation
+
+When brake is active, the commutation FSM is not driving the bridge outputs.
+
+```mermaid
+stateDiagram-v2
+    [*] --> BR_OFF
+    BR_OFF --> BR_ENTER_DEADTIME: brake_enable asserted
+    BR_ENTER_DEADTIME --> BR_ACTIVE: deadtime expires
+    BR_ACTIVE --> BR_EXIT_DEADTIME: brake_enable deasserted
+    BR_EXIT_DEADTIME --> BR_OFF: deadtime expires
 ```

@@ -8,6 +8,8 @@ This repository contains a synthesizable SystemVerilog BLDC motor controller wit
 
 - `doc/bldc.txt`: original design brief
 - `doc/SpartanESC.asc`: schematic export referenced by the brief
+- `ip_repo/`: Vivado packaged-IP flow and generated IP repository contents
+- `software/`: C headers for the AXI-Lite register map and MMIO helpers
 - `rtl/bldc_axi_controller.sv`: thin top-level wrapper
 - `rtl/bldc_axi_slave.sv`: 60 MHz AXI-Lite frontend with command/response CDC bridge
 - `rtl/bldc_motor_ctrl_domain.sv`: 100 MHz motor-control register domain
@@ -18,6 +20,9 @@ This repository contains a synthesizable SystemVerilog BLDC motor controller wit
 
 - AXI-Lite slave interface on a 60 MHz clock domain
 - Motor-control core running on a separate 100 MHz clock domain
+- Two synchronous active-low resets:
+  - `rst_axi_n` synchronous to `clk_axi`
+  - `rst_motor_n` synchronous to `clk_motor`
 - Three Hall inputs: `HA`, `HB`, `HC`
 - Hall inputs are synchronized and filtered with a 5-sample majority voter
 - Six bridge control outputs: `AL`, `AH`, `BL`, `BH`, `CL`, `CH`
@@ -31,6 +36,10 @@ This repository contains a synthesizable SystemVerilog BLDC motor controller wit
   - `PH_OVERLAP`
   - `PH_DEADTIME`
 - PWM duty-cycle control using a 12-bit duty command
+- PWM low-side brake mode with:
+  - `CONTROL.brake_enable`
+  - programmable 12-bit brake duty
+  - deadtime-enforced brake entry and exit
 - Programmable PWM period covering 8 kHz to about 143.9 kHz at 100 MHz
 - Programmable deadtime with a practical range of 1 to 90 clocks
   - 1 motor clock at 100 MHz is 10 ns
@@ -60,9 +69,9 @@ All registers are 32-bit and word-aligned.
 | Address | Name | Description |
 | --- | --- | --- |
 | `0x00` | `ID` | Fixed ID value `0x424C4443` |
-| `0x04` | `CONTROL` | Bit 0 `drive_enable`, bit 1 `auto_comm_enable`, bit 2 `direction`, bit 3 `speed_ctrl_enable` |
-| `0x08` | `PWM_CFG` | Bits `[11:0]` duty command, bits `[31:16]` PWM period in clocks, clamped to 12500..695 for 8 kHz..143.9 kHz at 100 MHz |
-| `0x0C` | `DEADTIME` | Bits `[7:0]` high-side deadtime in clocks, bits `[15:8]` low-side overlap in clocks |
+| `0x04` | `CONTROL` | Bit `0` `drive_enable`, bit `1` `auto_comm_enable`, bit `2` `direction`, bit `3` `speed_ctrl_enable`, bit `4` `brake_enable` |
+| `0x08` | `PWM_CFG` | Bits `[11:0]` duty command, bits `[31:16]` PWM period in 100 MHz motor-domain clocks, clamped to 12500..695 for 8 kHz..143.9 kHz |
+| `0x0C` | `DEADTIME` | Bits `[7:0]` high-side deadtime in 100 MHz motor-domain clocks, bits `[15:8]` low-side overlap in 100 MHz motor-domain clocks |
 | `0x10` | `COMM_CFG` | Bits `[2:0]` manual commutation state |
 | `0x14` | `IRQ_MASK` | Bits `[5:0]` Hall edge masks, bit `[6]` FIFO interrupt mask. `1` masks the source |
 | `0x18` | `IRQ_STATUS` | Bits `[5:0]` pending Hall edge flags, bit `[6]` FIFO not-empty status. Write `1` to clear Hall edge bits |
@@ -72,7 +81,8 @@ All registers are 32-bit and word-aligned.
 | `0x28` | `SPEED_TARGET` | Bits `[15:0]` target transition count, bits `[27:16]` duty step size |
 | `0x2C` | `SPEED_WINDOW` | Auto-duty control window in 100 MHz motor-domain clocks |
 | `0x30` | `SPEED_STATUS` | Bits `[11:0]` current duty, bits `[27:12]` last measured auto-duty transition count |
-| `0x34` | `STATUS` | Hall, requested commutation state, active commutation state, deadtime, and PWM activity |
+| `0x34` | `STATUS` | Bits `[2:0]` filtered Hall state, bits `[6:4]` requested commutation state, bits `[10:8]` active commutation state, bit `[11]` deadtime active, bit `[12]` commutation PWM high, bit `[13]` brake active |
+| `0x38` | `BRAKE_CFG` | Bits `[11:0]` brake duty command. Uses the main PWM period in 100 MHz motor-domain clocks |
 
 ## Hall Mapping
 
@@ -112,6 +122,17 @@ Internally this is implemented as a small explicit phase FSM:
 
 The full state-to-state transition graph and the internal phase-flow diagram are documented in `doc/commutation_transition_graph.md`.
 
+## Brake Behavior
+
+The controller also supports a low-side PWM brake mode:
+
+- all high-side outputs remain off
+- all three low-side outputs switch together with the programmed brake duty
+- brake entry inserts deadtime with all outputs off
+- brake exit also inserts deadtime with all outputs off before normal commutation resumes
+
+The brake PWM reuses the main PWM period from `PWM_CFG`.
+
 ## Running Simulation
 
 Build and run with Icarus Verilog:
@@ -128,6 +149,16 @@ Expected result:
 PASS
 ```
 
+## Packaging As Vivado IP
+
+To package the controller into a Vivado IP repository:
+
+```sh
+vivado -mode batch -source ip_repo/package_bldc_axi_controller_ip.tcl
+```
+
+The generated packaged IP is written under `ip_repo/bldc_axi_controller_1_0`.
+
 ## Testbench Coverage
 
 The self-checking testbench verifies:
@@ -141,10 +172,12 @@ The self-checking testbench verifies:
 - transition-count FIFO push, interrupt, and pop behavior
 - auto-duty increase when measured rate is below target
 - auto-duty decrease when measured rate is above target
+- brake entry deadtime, low-side-only brake PWM, and brake exit deadtime
 
 ## Notes
 
 - The controller is split into a 60 MHz AXI-Lite domain and a 100 MHz motor-control domain.
+- Reset is also split by clock domain: `rst_axi_n` is sampled only on `clk_axi`, and `rst_motor_n` is sampled only on `clk_motor`.
 - AXI register accesses cross into the motor domain through a request/response CDC bridge.
 - The FIFO drops new samples when full.
 - Invalid Hall combinations map to commutation state `0`, which disables bridge drive until a valid code appears.
@@ -152,3 +185,9 @@ The self-checking testbench verifies:
 ## TODO
 
 - Investigate regenerative-braking capability in the ESC schematic for the next ESC revision, including charge acceptance on `VBUS`, current-sensing needs, and any required overvoltage or dump-path hardware.
+
+## Software Interface
+
+- `software/bldc_axi_controller_regs.h` defines register offsets, masks, shifts, and implemented range limits.
+- `software/bldc_axi_controller_hw.h` provides lightweight MMIO helpers and field packers.
+- When the RTL register map changes, update these headers in the same change.
